@@ -1,31 +1,23 @@
-package announcer
+package dopplerservice
 
 import (
 	"doppler/config"
 	"encoding/json"
 	"fmt"
+	"time"
+
 	"github.com/cloudfoundry/gosteno"
 	"github.com/cloudfoundry/storeadapter"
-	"time"
 )
 
-type Transport struct {
-	Protocol string `json:"protocol"`
-	Port     uint32 `json:"port"`
-}
 type DopplerMeta struct {
-	Version    uint32      `json:"version"`
-	Ip         string      `json:"ip"`
-	Transports []Transport `json:"transports"`
+	Version   uint32   `json:"version"`
+	Endpoints []string `json:"endpoints"`
 }
 
 const dopplerMetaVersion = 1
 
-func Announce(localIP string, ttl time.Duration, config *config.Config, storeAdapter storeadapter.StoreAdapter, logger *gosteno.Logger) (stopChan chan (chan bool)) {
-	if len(config.EtcdUrls) == 0 {
-		return
-	}
-
+func Announce(localIP string, ttl time.Duration, config *config.Config, storeAdapter storeadapter.StoreAdapter, logger *gosteno.Logger) chan (chan bool) {
 	dopplerMetaBytes, err := buildDopplerMeta(localIP, config)
 	if err != nil {
 		panic(err)
@@ -54,7 +46,7 @@ func Announce(localIP string, ttl time.Duration, config *config.Config, storeAda
 	return stopChan
 }
 
-func AnnounceLegacy(localIP string, ttl time.Duration, config *config.Config, storeAdapter storeadapter.StoreAdapter, logger *gosteno.Logger) (stopChan chan (chan bool)) {
+func AnnounceLegacy(localIP string, ttl time.Duration, config *config.Config, storeAdapter storeadapter.StoreAdapter, logger *gosteno.Logger) chan (chan bool) {
 	key := fmt.Sprintf("/healthstatus/doppler/%s/%s/%d", config.Zone, config.JobName, config.Index)
 	status, stopChan, err := storeAdapter.MaintainNode(storeadapter.StoreNode{
 		Key:   key,
@@ -78,15 +70,12 @@ func AnnounceLegacy(localIP string, ttl time.Duration, config *config.Config, st
 
 func buildDopplerMeta(localIp string, config *config.Config) ([]byte, error) {
 	dopplerMeta := DopplerMeta{
-		Version: dopplerMetaVersion,
-		Ip:      localIp,
-		Transports: []Transport{
-			Transport{Protocol: "udp", Port: config.DropsondeIncomingMessagesPort},
-		},
+		Version:   dopplerMetaVersion,
+		Endpoints: []string{fmt.Sprintf("udp://%s:%d", localIp, config.DropsondeIncomingMessagesPort)},
 	}
 
 	if config.EnableTLSTransport {
-		dopplerMeta.Transports = append(dopplerMeta.Transports, Transport{Protocol: "tls", Port: config.TLSListenerConfig.Port})
+		dopplerMeta.Endpoints = append(dopplerMeta.Endpoints, fmt.Sprintf("tls://%s:%d", localIp, config.TLSListenerConfig.Port))
 	}
 
 	return json.Marshal(dopplerMeta)

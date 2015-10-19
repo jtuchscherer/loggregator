@@ -12,7 +12,7 @@ import (
 
 	"doppler/config"
 
-	"doppler/announcer"
+	"doppler/dopplerservice"
 
 	"github.com/cloudfoundry/dropsonde"
 	"github.com/cloudfoundry/gunk/workpool"
@@ -123,8 +123,8 @@ func main() {
 
 	dumpChan := registerGoRoutineDumpSignalChannel()
 
-	releaseNodeChan := announcer.Announce(localIp, config.HeartbeatInterval, conf, dopplerStoreAdapter, log)
-	legacyReleaseNodeChan := announcer.AnnounceLegacy(localIp, config.HeartbeatInterval, conf, legacyStoreAdapter, log)
+	releaseNodeChan := dopplerservice.Announce(localIp, config.HeartbeatInterval, conf, dopplerStoreAdapter, log)
+	legacyReleaseNodeChan := dopplerservice.AnnounceLegacy(localIp, config.HeartbeatInterval, conf, legacyStoreAdapter, log)
 
 	for {
 		select {

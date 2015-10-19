@@ -10,7 +10,7 @@ import (
 
 	"doppler/config"
 
-	"doppler/announcer"
+	"doppler/dopplerservice"
 
 	"github.com/cloudfoundry/storeadapter"
 	. "github.com/onsi/ginkgo"
@@ -43,7 +43,7 @@ var _ = Describe("Etcd Integration tests", func() {
 		It("arrives safely in etcd", func() {
 			storeAdapter := setupAdapter(legacyETCDKey, conf)
 
-			legacyReleaseChan := announcer.AnnounceLegacy(localIp, time.Second, &conf, storeAdapter, loggertesthelper.Logger())
+			legacyReleaseChan := dopplerservice.AnnounceLegacy(localIp, time.Second, &conf, storeAdapter, loggertesthelper.Logger())
 			defer close(legacyReleaseChan)
 
 			Eventually(func() error {
@@ -55,16 +55,17 @@ var _ = Describe("Etcd Integration tests", func() {
 
 	Context("Store Transport", func() {
 		Context("With EnableTlsTransport set to true", func() {
-			It("stores udp and tcp transport in etcd", func() {
+			FIt("stores udp and tcp transport in etcd", func() {
 				conf.EnableTLSTransport = true
 				conf.TLSListenerConfig = config.TLSListenerConfig{
 					Port: 4567,
 				}
 				storeAdapter := setupAdapter(dopplerETCDKey, conf)
 
-				stopChan := announcer.Announce(localIp, time.Second, &conf, storeAdapter, loggertesthelper.Logger())
+				stopChan := dopplerservice.Announce(localIp, time.Second, &conf, storeAdapter, loggertesthelper.Logger())
 				defer close(stopChan)
 
+				finder := dopplerservice.NewFinder()
 				dopplerMeta := createDopplerMeta(localIp, conf)
 
 				Eventually(func() []byte {
@@ -80,7 +81,7 @@ var _ = Describe("Etcd Integration tests", func() {
 				conf.EnableTLSTransport = false
 				storeAdapter := setupAdapter(dopplerETCDKey, conf)
 
-				stopChan := announcer.Announce(localIp, time.Second, &conf, storeAdapter, loggertesthelper.Logger())
+				stopChan := dopplerservice.Announce(localIp, time.Second, &conf, storeAdapter, loggertesthelper.Logger())
 				defer close(stopChan)
 
 				Eventually(func() []byte {
@@ -97,7 +98,7 @@ var _ = Describe("Etcd Integration tests", func() {
 			conf.TLSListenerConfig = config.TLSListenerConfig{
 				Port: 4567,
 			}
-			releaseNodeChan := announcer.Announce(localIp, time.Second, &conf, storeAdapter, loggertesthelper.Logger())
+			releaseNodeChan := dopplerservice.Announce(localIp, time.Second, &conf, storeAdapter, loggertesthelper.Logger())
 			dopplerMeta := createDopplerMeta(localIp, conf)
 
 			Eventually(func() []byte {
@@ -109,7 +110,7 @@ var _ = Describe("Etcd Integration tests", func() {
 			close(releaseNodeChan)
 
 			conf.EnableTLSTransport = false
-			releaseNodeChan = announcer.Announce(localIp, time.Second, &conf, storeAdapter, loggertesthelper.Logger())
+			releaseNodeChan = dopplerservice.Announce(localIp, time.Second, &conf, storeAdapter, loggertesthelper.Logger())
 			updatedDopplerMeta := createDopplerMetaNoTLS(localIp, conf)
 
 			Eventually(func() []byte {
@@ -129,7 +130,7 @@ var _ = Describe("Etcd Integration tests", func() {
 			dopplerMeta := createDopplerMeta(localIp, conf)
 			storeAdapter := setupAdapter(dopplerETCDKey, conf)
 
-			metaReleaseChan := announcer.Announce(localIp, time.Second, &conf, storeAdapter, loggertesthelper.Logger())
+			metaReleaseChan := dopplerservice.Announce(localIp, time.Second, &conf, storeAdapter, loggertesthelper.Logger())
 
 			Eventually(func() []byte {
 				node, _ := storeAdapter.Get(dopplerETCDKey)
@@ -138,7 +139,7 @@ var _ = Describe("Etcd Integration tests", func() {
 			close(metaReleaseChan)
 
 			legacyStoreAdapter := setupAdapter(legacyETCDKey, conf)
-			legacyReleaseChan := announcer.AnnounceLegacy(localIp, time.Second, &conf, legacyStoreAdapter, loggertesthelper.Logger())
+			legacyReleaseChan := dopplerservice.AnnounceLegacy(localIp, time.Second, &conf, legacyStoreAdapter, loggertesthelper.Logger())
 
 			Eventually(func() string {
 				node, _ := storeAdapter.Get(legacyETCDKey)

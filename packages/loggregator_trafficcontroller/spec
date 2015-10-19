@@ -12,7 +12,6 @@ files:
 - loggregator/src/trafficcontroller/listener/*.go # gosub
 - loggregator/src/trafficcontroller/marshaller/*.go # gosub
 - loggregator/src/trafficcontroller/profiler/*.go # gosub
-- loggregator/src/trafficcontroller/serveraddressprovider/*.go # gosub
 - loggregator/src/trafficcontroller/uaa_client/*.go # gosub
 - loggregator/src/common/monitor/*.go # gosub
 - loggregator/src/github.com/cloudfoundry/dropsonde/*.go # gosub
@@ -44,3 +43,4 @@ files:
 - loggregator/src/github.com/pivotal-golang/localip/*.go # gosub
 - loggregator/src/github.com/ugorji/go/codec/*.go # gosub
 - loggregator/src/logger/*.go # gosub
+- loggregator/src/trafficcontroller/serveraddressprovider/*.go # gosub
