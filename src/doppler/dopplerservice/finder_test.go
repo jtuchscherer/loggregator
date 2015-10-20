@@ -209,8 +209,8 @@ var _ = Describe("Finder", func() {
 				updateNode.Value = []byte("10.0.0.2")
 			})
 
-			Context("Basics", testFinder("10.0.0.1:1234"))
-			Context("Update", testUpdateFinder("10.0.0.2:1234"))
+			Context("Basics", testFinder("udp://10.0.0.1:1234"))
+			Context("Update", testUpdateFinder("udp://10.0.0.2:1234"))
 		})
 
 		Context("Finder", func() {

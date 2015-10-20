@@ -16,7 +16,7 @@ type Finder interface {
 	Start()
 	Stop()
 
-	// returns a set of addresses (host:port)
+	// returns a set of urls (scheme://host:port)
 	Addresses() []string
 }
 
@@ -62,7 +62,7 @@ func NewLegacyFinder(storeAdapter storeadapter.StoreAdapter, port int, logger *g
 			if value == nil {
 				return nil
 			}
-			return []string{fmt.Sprintf("%s:%d", value, port)}
+			return []string{fmt.Sprintf("udp://%s:%d", value, port)}
 		},
 		logger: logger,
 	}
