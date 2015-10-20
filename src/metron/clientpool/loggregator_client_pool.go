@@ -17,54 +17,47 @@ type ServerGetters interface {
 }
 
 type DopplerClient struct {
-	clients    map[string]loggregatorclient.LoggregatorClient
-	clientList []loggregatorclient.LoggregatorClient
-	logger     *gosteno.Logger
-	sync.RWMutex
-	allServers    ServerGetters
-	legacyServers ServerGetters
-
 	preferredProtocol string
+	logger            *gosteno.Logger
 
-	index    int
-	previous []string
+	sync.RWMutex
+	clients       map[string]loggregatorclient.LoggregatorClient
+	clientList    []loggregatorclient.LoggregatorClient
+	servers       []string
+	legacyServers []string
 }
 
-func NewDopplerClient(logger *gosteno.Logger, preferredProtocol string, servers ServerGetters, legacyServers ServerGetters) *DopplerClient {
+func NewDopplerClient(logger *gosteno.Logger, preferredProtocol string) *DopplerClient {
 	return &DopplerClient{
 		logger:            logger,
-		allServers:        servers,
-		legacyServers:     legacyServers,
 		preferredProtocol: preferredProtocol,
 	}
 }
 
-func (pool *DopplerClient) ListClients() []loggregatorclient.LoggregatorClient {
-	all := pool.allServers.Addresses()
-	pool.syncWithAddressList(pool.inZone(all))
-
-	if len(pool.clients) == 0 {
-		pool.syncWithAddressList(all)
+func (pool *DopplerClient) Set(all []string, preferred []string) {
+	pool.Lock()
+	if len(preferred) > 0 {
+		pool.servers = preferred
+	} else if len(all) > 0 {
+		pool.servers = all
+	} else {
+		pool.servers = nil
 	}
+	pool.merge()
+	pool.Unlock()
+}
 
-	all = pool.legacyServers.Addresses()
-	if len(pool.clients) == 0 {
-		pool.syncWithAddressList(pool.inZone(all))
+func (pool *DopplerClient) SetLegacy(all []string, preferred []string) {
+	pool.Lock()
+	if len(preferred) > 0 {
+		pool.legacyServers = preferred
+	} else if len(all) > 0 {
+		pool.legacyServers = all
+	} else {
+		pool.legacyServers = nil
 	}
-
-	if len(pool.clients) == 0 {
-		pool.syncWithAddressList(all)
-	}
-
-	pool.RLock()
-	defer pool.RUnlock()
-
-	val := make([]loggregatorclient.LoggregatorClient, 0, len(pool.clients))
-	for _, client := range pool.clients {
-		val = append(val, client)
-	}
-
-	return val
+	pool.merge()
+	pool.Unlock()
 }
 
 func (pool *DopplerClient) RandomClient() (loggregatorclient.LoggregatorClient, error) {
@@ -76,11 +69,8 @@ func (pool *DopplerClient) RandomClient() (loggregatorclient.LoggregatorClient, 
 	return list[rand.Intn(len(list))], nil
 }
 
-func (pool *DopplerClient) syncWithAddressList(addresses []string) {
+func (pool *DopplerClient) merge() {
 	newClients := map[string]loggregatorclient.LoggregatorClient{}
-
-	pool.Lock()
-	defer pool.Unlock()
 
 	for _, address := range addresses {
 		c := pool.clients[address]
