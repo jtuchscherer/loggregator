@@ -131,7 +131,7 @@ func makeProxy(adapter storeadapter.StoreAdapter, config *config.Config, logger 
 	uaaClient := uaa_client.NewUaaClient(config.UaaHost, config.UaaClientId, config.UaaClientSecret, config.SkipCertVerify)
 	adminAuthorizer := authorization.NewAdminAccessAuthorizer(*disableAccessControl, &uaaClient)
 
-	finder := dopplerservice.NewLegacyFinder(adapter, int(config.DopplerPort), logger)
+	finder := dopplerservice.NewLegacyFinder(adapter, int(config.DopplerPort), nil, logger)
 	finder.Start()
 
 	cgc := channel_group_connector.NewChannelGroupConnector(finder, listenerConstructor, messageGenerator, logger)

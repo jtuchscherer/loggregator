@@ -13,10 +13,16 @@ type FakeFinder struct {
 	StopStub        func()
 	stopMutex       sync.RWMutex
 	stopArgsForCall []struct{}
-	AddressesStub        func() []string
-	addressesMutex       sync.RWMutex
-	addressesArgsForCall []struct{}
-	addressesReturns struct {
+	AllServersStub        func() []string
+	allServersMutex       sync.RWMutex
+	allServersArgsForCall []struct{}
+	allServersReturns struct {
+		result1 []string
+	}
+	PreferredServersStub        func() []string
+	preferredServersMutex       sync.RWMutex
+	preferredServersArgsForCall []struct{}
+	preferredServersReturns struct {
 		result1 []string
 	}
 }
@@ -51,26 +57,50 @@ func (fake *FakeFinder) StopCallCount() int {
 	return len(fake.stopArgsForCall)
 }
 
-func (fake *FakeFinder) Addresses() []string {
-	fake.addressesMutex.Lock()
-	fake.addressesArgsForCall = append(fake.addressesArgsForCall, struct{}{})
-	fake.addressesMutex.Unlock()
-	if fake.AddressesStub != nil {
-		return fake.AddressesStub()
+func (fake *FakeFinder) AllServers() []string {
+	fake.allServersMutex.Lock()
+	fake.allServersArgsForCall = append(fake.allServersArgsForCall, struct{}{})
+	fake.allServersMutex.Unlock()
+	if fake.AllServersStub != nil {
+		return fake.AllServersStub()
 	} else {
-		return fake.addressesReturns.result1
+		return fake.allServersReturns.result1
 	}
 }
 
-func (fake *FakeFinder) AddressesCallCount() int {
-	fake.addressesMutex.RLock()
-	defer fake.addressesMutex.RUnlock()
-	return len(fake.addressesArgsForCall)
+func (fake *FakeFinder) AllServersCallCount() int {
+	fake.allServersMutex.RLock()
+	defer fake.allServersMutex.RUnlock()
+	return len(fake.allServersArgsForCall)
 }
 
-func (fake *FakeFinder) AddressesReturns(result1 []string) {
-	fake.AddressesStub = nil
-	fake.addressesReturns = struct {
+func (fake *FakeFinder) AllServersReturns(result1 []string) {
+	fake.AllServersStub = nil
+	fake.allServersReturns = struct {
+		result1 []string
+	}{result1}
+}
+
+func (fake *FakeFinder) PreferredServers() []string {
+	fake.preferredServersMutex.Lock()
+	fake.preferredServersArgsForCall = append(fake.preferredServersArgsForCall, struct{}{})
+	fake.preferredServersMutex.Unlock()
+	if fake.PreferredServersStub != nil {
+		return fake.PreferredServersStub()
+	} else {
+		return fake.preferredServersReturns.result1
+	}
+}
+
+func (fake *FakeFinder) PreferredServersCallCount() int {
+	fake.preferredServersMutex.RLock()
+	defer fake.preferredServersMutex.RUnlock()
+	return len(fake.preferredServersArgsForCall)
+}
+
+func (fake *FakeFinder) PreferredServersReturns(result1 []string) {
+	fake.PreferredServersStub = nil
+	fake.preferredServersReturns = struct {
 		result1 []string
 	}{result1}
 }

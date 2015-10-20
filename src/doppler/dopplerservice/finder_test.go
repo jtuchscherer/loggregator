@@ -2,6 +2,7 @@ package dopplerservice_test
 
 import (
 	"errors"
+	"strings"
 	"sync/atomic"
 
 	"github.com/cloudfoundry/gunk/workpool"
@@ -38,7 +39,10 @@ var _ = Describe("Finder", func() {
 		})
 
 		JustBeforeEach(func() {
-			finder = dopplerservice.NewFinder(fakeAdapter, nil, loggertesthelper.Logger())
+			preferredCallback := func(string) bool {
+				return false
+			}
+			finder = dopplerservice.NewFinder(fakeAdapter, preferredCallback, nil, loggertesthelper.Logger())
 			finder.Start()
 		})
 
@@ -86,8 +90,11 @@ var _ = Describe("Finder", func() {
 			node         storeadapter.StoreNode
 			updateNode   storeadapter.StoreNode
 
-			updateCallback func([]string)
+			updateCallback func(all []string, preferred []string)
 			callbackCount  *int32
+
+			preferredCallback func(key string) bool
+			preferredCount    *int32
 		)
 
 		BeforeEach(func() {
@@ -109,8 +116,15 @@ var _ = Describe("Finder", func() {
 
 			callbackCount = new(int32)
 			count := callbackCount
-			updateCallback = func(a []string) {
+			updateCallback = func(a []string, p []string) {
 				atomic.AddInt32(count, 1)
+			}
+
+			preferredCount = new(int32)
+			pCount := preferredCount
+			preferredCallback = func(string) bool {
+				atomic.AddInt32(pCount, 1)
+				return true
 			}
 		})
 
@@ -122,6 +136,10 @@ var _ = Describe("Finder", func() {
 			return int(atomic.LoadInt32(callbackCount))
 		}
 
+		getPreferredCount := func() int {
+			return int(atomic.LoadInt32(preferredCount))
+		}
+
 		testUpdateFinder := func(updatedAddress ...string) func() {
 			return func() {
 				Context("when a service exists", func() {
@@ -130,15 +148,18 @@ var _ = Describe("Finder", func() {
 						Expect(err).NotTo(HaveOccurred())
 
 						finder.Start()
-						Eventually(finder.Addresses).ShouldNot(HaveLen(0))
+						Eventually(finder.AllServers).ShouldNot(HaveLen(0))
+						Expect(finder.PreferredServers()).NotTo(HaveLen(0))
 					})
 
 					It("updates the service", func() {
 						err := storeAdapter.Update(updateNode)
 						Expect(err).NotTo(HaveOccurred())
 
-						Eventually(finder.Addresses).Should(ConsistOf(updatedAddress))
+						Eventually(finder.AllServers).Should(ConsistOf(updatedAddress))
 						Expect(getCallbackCount()).To(Equal(2))
+						Expect(finder.PreferredServers()).To(ConsistOf(updatedAddress))
+						Expect(getPreferredCount()).To(Equal(2))
 					})
 				})
 			}
@@ -149,25 +170,30 @@ var _ = Describe("Finder", func() {
 				Context("when a service is created", func() {
 					Context("before dopplerservice begins", func() {
 						It("finds server addresses that were created before it started", func() {
-							Expect(finder.Addresses()).To(HaveLen(0))
+							Expect(finder.AllServers()).To(HaveLen(0))
+							Expect(finder.PreferredServers()).To(HaveLen(0))
 
 							storeAdapter.Create(node)
 							finder.Start()
 
-							Eventually(finder.Addresses).Should(ConsistOf(expectedAddress))
+							Eventually(finder.AllServers).Should(ConsistOf(expectedAddress))
 							Expect(getCallbackCount()).To(Equal(1))
+							Expect(finder.PreferredServers()).To(ConsistOf(expectedAddress))
+							Expect(getPreferredCount()).To(Equal(1))
 						})
 					})
 
 					Context("after dopplerservice begins", func() {
 						It("adds servers that appear later", func() {
 							finder.Start()
-							Consistently(finder.Addresses, 1).Should(BeEmpty())
+							Consistently(finder.AllServers, 1).Should(BeEmpty())
 
 							storeAdapter.Create(node)
 
-							Eventually(finder.Addresses).Should(ConsistOf(expectedAddress))
+							Eventually(finder.AllServers).Should(ConsistOf(expectedAddress))
 							Expect(getCallbackCount()).To(Equal(1))
+							Expect(finder.PreferredServers()).To(ConsistOf(expectedAddress))
+							Expect(getPreferredCount()).To(Equal(1))
 						})
 					})
 				})
@@ -178,14 +204,17 @@ var _ = Describe("Finder", func() {
 						Expect(err).NotTo(HaveOccurred())
 
 						finder.Start()
-						Eventually(finder.Addresses).ShouldNot(HaveLen(0))
+						Eventually(finder.AllServers).ShouldNot(HaveLen(0))
+						Expect(finder.PreferredServers()).NotTo(HaveLen(0))
 					})
 
 					It("removes the service", func() {
 						err := storeAdapter.Delete(node.Key)
 						Expect(err).NotTo(HaveOccurred())
-						Eventually(finder.Addresses).Should(BeEmpty())
+						Eventually(finder.AllServers).Should(BeEmpty())
 						Expect(getCallbackCount()).To(Equal(2))
+						Expect(finder.PreferredServers()).To(BeEmpty())
+						Expect(getPreferredCount()).To(Equal(1))
 					})
 
 					It("only finds nodes for the doppler server type", func() {
@@ -195,8 +224,10 @@ var _ = Describe("Finder", func() {
 						}
 						storeAdapter.Create(router)
 
-						Consistently(finder.Addresses).Should(ConsistOf(expectedAddress))
+						Consistently(finder.AllServers).Should(ConsistOf(expectedAddress))
 						Expect(getCallbackCount()).To(Equal(1))
+						Expect(finder.PreferredServers()).To(ConsistOf(expectedAddress))
+						Expect(getPreferredCount()).To(Equal(1))
 					})
 
 					Context("when ETCD is not running", func() {
@@ -209,7 +240,8 @@ var _ = Describe("Finder", func() {
 						})
 
 						It("continues to run if the store times out", func() {
-							Consistently(finder.Addresses).ShouldNot(HaveLen(0))
+							Consistently(finder.AllServers).ShouldNot(HaveLen(0))
+							Expect(finder.PreferredServers()).NotTo(HaveLen(0))
 						})
 					})
 				})
@@ -218,7 +250,7 @@ var _ = Describe("Finder", func() {
 
 		Context("LegacyFinder", func() {
 			BeforeEach(func() {
-				finder = dopplerservice.NewLegacyFinder(storeAdapter, 1234, updateCallback, loggertesthelper.Logger())
+				finder = dopplerservice.NewLegacyFinder(storeAdapter, 1234, preferredCallback, updateCallback, loggertesthelper.Logger())
 				node = storeadapter.StoreNode{
 					Key:   dopplerservice.LEGACY_ROOT + "/z1/loggregator_z1/0",
 					Value: []byte("10.0.0.1"),
@@ -234,7 +266,7 @@ var _ = Describe("Finder", func() {
 
 		Context("Finder", func() {
 			BeforeEach(func() {
-				finder = dopplerservice.NewFinder(storeAdapter, updateCallback, loggertesthelper.Logger())
+				finder = dopplerservice.NewFinder(storeAdapter, preferredCallback, updateCallback, loggertesthelper.Logger())
 			})
 
 			Context("with a single endpoint", func() {
@@ -265,6 +297,42 @@ var _ = Describe("Finder", func() {
 
 				Context("Basics", testFinder("udp://10.0.0.1:1234", "tls://10.0.0.2:4567"))
 				Context("Update", testUpdateFinder("udp://10.0.0.2:1235", "tls://10.0.0.3:4568"))
+
+			})
+		})
+
+		Context("with a preferred filter", func() {
+			BeforeEach(func() {
+				preferredCallback = func(k string) bool {
+					return strings.Index(k, "z2") > 0
+				}
+
+				finder = dopplerservice.NewFinder(storeAdapter, preferredCallback, updateCallback, loggertesthelper.Logger())
+			})
+
+			JustBeforeEach(func() {
+				node = storeadapter.StoreNode{
+					Key:   dopplerservice.META_ROOT + "/z1/loggregator_z1/0",
+					Value: []byte(`{"version": 1, "endpoints":["udp://10.0.0.1:1234"]}`),
+				}
+				storeAdapter.Create(node)
+
+				node2 := storeadapter.StoreNode{
+					Key:   dopplerservice.META_ROOT + "/z2/loggregator_z1/0",
+					Value: []byte(`{"version": 1, "endpoints":["udp://10.0.0.2:1234"]}`),
+				}
+				storeAdapter.Create(node2)
+
+				finder.Start()
+			})
+
+			AfterEach(func() {
+				finder.Stop()
+			})
+
+			It("filters", func() {
+				Eventually(finder.AllServers).Should(HaveLen(2))
+				Expect(finder.PreferredServers()).To(ConsistOf("udp://10.0.0.2:1234"))
 			})
 		})
 	})

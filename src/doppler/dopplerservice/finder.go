@@ -17,28 +17,35 @@ type Finder interface {
 	Stop()
 
 	// returns a set of urls (scheme://host:port)
-	Addresses() []string
+	AllServers() []string
+	PreferredServers() []string
 }
 
 type finder struct {
 	storeAdapter   storeadapter.StoreAdapter
 	stopChan       chan struct{}
 	storeKeyPrefix string
-	onUpdate       func([]string)
+	onUpdate       func(all []string, preferred []string)
+	preferred      func(key string) bool
 
 	sync.RWMutex
-	addressMap map[string]struct{}
-	addresses  []string
+	addressMap        map[string]struct{}
+	addresses         []string
+	preferredMap      map[string]struct{}
+	preferedAddresses []string
 
 	unmarshal func(value []byte) []string
 	logger    *gosteno.Logger
 }
 
-func NewFinder(storeAdapter storeadapter.StoreAdapter, onUpdate func(addresses []string), logger *gosteno.Logger) Finder {
+func NewFinder(storeAdapter storeadapter.StoreAdapter, preferred func(key string) bool, onUpdate func(all []string, preferred []string), logger *gosteno.Logger) Finder {
 	return &finder{
-		storeAdapter:   storeAdapter,
-		addresses:      []string{},
-		addressMap:     make(map[string]struct{}),
+		storeAdapter:      storeAdapter,
+		addresses:         []string{},
+		addressMap:        make(map[string]struct{}),
+		preferedAddresses: []string{},
+		preferredMap:      make(map[string]struct{}),
+
 		stopChan:       make(chan struct{}),
 		storeKeyPrefix: META_ROOT,
 		unmarshal: func(value []byte) []string {
@@ -50,16 +57,20 @@ func NewFinder(storeAdapter storeadapter.StoreAdapter, onUpdate func(addresses [
 			}
 			return nil
 		},
-		onUpdate: onUpdate,
-		logger:   logger,
+		onUpdate:  onUpdate,
+		preferred: preferred,
+		logger:    logger,
 	}
 }
 
-func NewLegacyFinder(storeAdapter storeadapter.StoreAdapter, port int, onUpdate func(addresses []string), logger *gosteno.Logger) Finder {
+func NewLegacyFinder(storeAdapter storeadapter.StoreAdapter, port int, preferred func(key string) bool, onUpdate func(all []string, preferred []string), logger *gosteno.Logger) Finder {
 	return &finder{
-		storeAdapter:   storeAdapter,
-		addresses:      []string{},
-		addressMap:     make(map[string]struct{}),
+		storeAdapter:      storeAdapter,
+		addresses:         []string{},
+		addressMap:        make(map[string]struct{}),
+		preferedAddresses: []string{},
+		preferredMap:      make(map[string]struct{}),
+
 		stopChan:       make(chan struct{}),
 		storeKeyPrefix: LEGACY_ROOT,
 		unmarshal: func(value []byte) []string {
@@ -68,8 +79,9 @@ func NewLegacyFinder(storeAdapter storeadapter.StoreAdapter, port int, onUpdate 
 			}
 			return []string{fmt.Sprintf("udp://%s:%d", value, port)}
 		},
-		onUpdate: onUpdate,
-		logger:   logger,
+		onUpdate:  onUpdate,
+		preferred: preferred,
+		logger:    logger,
 	}
 }
 
@@ -107,8 +119,12 @@ func (f *finder) handleEvent(event *storeadapter.WatchEvent) {
 	f.Lock()
 	switch event.Type {
 	case storeadapter.CreateEvent:
+		preferred := f.preferred(event.Node.Key)
 		for _, v := range f.unmarshal(value) {
 			f.addressMap[v] = struct{}{}
+			if preferred {
+				f.preferredMap[v] = struct{}{}
+			}
 		}
 	case storeadapter.DeleteEvent:
 		fallthrough
@@ -116,22 +132,31 @@ func (f *finder) handleEvent(event *storeadapter.WatchEvent) {
 		prevValue := event.PrevNode.Value
 		for _, v := range f.unmarshal(prevValue) {
 			delete(f.addressMap, v)
+			delete(f.preferredMap, v)
 		}
 	case storeadapter.UpdateEvent:
 		prevValue := event.PrevNode.Value
+		preferred := f.preferred(event.PrevNode.Key)
 		if !bytes.Equal(value, prevValue) {
 			for _, v := range f.unmarshal(prevValue) {
 				delete(f.addressMap, v)
+				if preferred {
+					delete(f.preferredMap, v)
+				}
 			}
 			for _, v := range f.unmarshal(value) {
 				f.addressMap[v] = struct{}{}
+				if preferred {
+					f.preferredMap[v] = struct{}{}
+				}
 			}
 		}
 	}
 
 	f.addresses = keys(f.addressMap)
+	f.preferedAddresses = keys(f.preferredMap)
 	if f.onUpdate != nil {
-		f.onUpdate(f.addresses)
+		f.onUpdate(f.addresses, f.preferedAddresses)
 	}
 	f.Unlock()
 
@@ -165,21 +190,30 @@ func (f *finder) discoverAddresses() {
 	leaves := leafNodes(node)
 
 	addressMap := make(map[string]struct{})
+	preferredMap := make(map[string]struct{})
 
 	for _, leaf := range leaves {
+		preferred := f.preferred(leaf.Key)
 		for _, v := range f.unmarshal(leaf.Value) {
 			addressMap[v] = struct{}{}
+			if preferred {
+				preferredMap[v] = struct{}{}
+			}
 		}
 	}
 
 	addresses := keys(addressMap)
+	preferredAddress := keys(preferredMap)
 
 	f.Lock()
 	f.addressMap = addressMap
 	f.addresses = addresses
 
+	f.preferredMap = preferredMap
+	f.preferedAddresses = preferredAddress
+
 	if f.onUpdate != nil {
-		f.onUpdate(f.addresses)
+		f.onUpdate(f.addresses, f.preferedAddresses)
 	}
 	f.Unlock()
 }
@@ -191,10 +225,16 @@ func (f *finder) Stop() {
 	}
 }
 
-func (f *finder) Addresses() []string {
+func (f *finder) AllServers() []string {
 	f.RLock()
 	defer f.RUnlock()
 	return f.addresses
+}
+
+func (f *finder) PreferredServers() []string {
+	f.RLock()
+	defer f.RUnlock()
+	return f.preferedAddresses
 }
 
 func leafNodes(root storeadapter.StoreNode) []storeadapter.StoreNode {
