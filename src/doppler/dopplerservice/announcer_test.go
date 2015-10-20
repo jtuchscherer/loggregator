@@ -3,12 +3,12 @@ package dopplerservice_test
 import (
 	"doppler/config"
 	"doppler/dopplerservice"
+	"doppler/dopplerservice/fakes"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/cloudfoundry/loggregatorlib/loggertesthelper"
-	"github.com/cloudfoundry/storeadapter/fakestoreadapter"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -36,10 +36,16 @@ var _ = Describe("Announcer", func() {
 				dopplerKey = fmt.Sprintf("/doppler/meta/%s/%s/%d", conf.Zone, conf.JobName, conf.Index)
 			})
 
+			It("maintains the node", func() {
+				fakeadapter := &fakes.FakeStoreAdapter{}
+				dopplerservice.Announce(localIP, time.Second, &conf, fakeadapter, loggertesthelper.Logger())
+				Expect(fakeadapter.MaintainNodeCallCount()).To(Equal(1))
+			})
+
 			It("Panics if MaintainNode returns error", func() {
 				err := errors.New("some etcd time out error")
-				fakeadapter := fakestoreadapter.New()
-				fakeadapter.MaintainNodeError = err
+				fakeadapter := &fakes.FakeStoreAdapter{}
+				fakeadapter.MaintainNodeReturns(nil, nil, err)
 				Expect(func() {
 					dopplerservice.Announce(localIP, time.Second, &conf, fakeadapter, loggertesthelper.Logger())
 				}).To(Panic())
@@ -89,6 +95,21 @@ var _ = Describe("Announcer", func() {
 
 		BeforeEach(func() {
 			legacyKey = fmt.Sprintf("/healthstatus/doppler/%s/%s/%d", conf.Zone, conf.JobName, conf.Index)
+		})
+
+		It("maintains the node", func() {
+			fakeadapter := &fakes.FakeStoreAdapter{}
+			dopplerservice.AnnounceLegacy(localIP, time.Second, &conf, fakeadapter, loggertesthelper.Logger())
+			Expect(fakeadapter.MaintainNodeCallCount()).To(Equal(1))
+		})
+
+		It("Panics if MaintainNode returns error", func() {
+			err := errors.New("some etcd time out error")
+			fakeadapter := &fakes.FakeStoreAdapter{}
+			fakeadapter.MaintainNodeReturns(nil, nil, err)
+			Expect(func() {
+				dopplerservice.AnnounceLegacy(localIP, time.Second, &conf, fakeadapter, loggertesthelper.Logger())
+			}).To(Panic())
 		})
 
 		It("Should maintain legacy healthstatus key and value", func() {
