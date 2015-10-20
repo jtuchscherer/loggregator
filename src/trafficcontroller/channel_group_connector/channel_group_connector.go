@@ -43,7 +43,7 @@ func (c *ChannelGroupConnector) Connect(dopplerEndpoint doppler_endpoint.Doppler
 
 loop:
 	for {
-		serverAddresses := c.finder.Addresses()
+		serverAddresses := c.finder.AllServers()
 
 		if len(serverAddresses) == 0 {
 			c.logger.Debugf("ChannelGroupConnector.Connect: No doppler servers available. Trying again in %s", checkServerAddressesInterval.String())

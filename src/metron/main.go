@@ -1,10 +1,14 @@
 package main
 
 import (
+	"doppler/dopplerservice"
 	"flag"
 	"fmt"
+	"path"
+	"strings"
 	"time"
 
+	"metron/clientpool"
 	"metron/networkreader"
 	"metron/writers/dopplerforwarder"
 	"metron/writers/eventmarshaller"
@@ -23,8 +27,6 @@ import (
 	"github.com/cloudfoundry/dropsonde/metrics"
 	"github.com/cloudfoundry/gosteno"
 	"github.com/cloudfoundry/gunk/workpool"
-	"github.com/cloudfoundry/loggregatorlib/clientpool"
-	"github.com/cloudfoundry/loggregatorlib/servicediscovery"
 	"github.com/cloudfoundry/storeadapter"
 	"github.com/cloudfoundry/storeadapter/etcdstoreadapter"
 
@@ -80,13 +82,23 @@ func initializeClientPool(config *config.Config, logger *gosteno.Logger) *client
 		logger.Errorf("Error connecting to ETCD: %v", err)
 	}
 
-	inZoneServerAddressList := servicediscovery.NewServerAddressList(adapter, "/healthstatus/doppler/"+config.Zone, logger)
-	allZoneServerAddressList := servicediscovery.NewServerAddressList(adapter, "/healthstatus/doppler/", logger)
+	inZone := func(key string) bool {
+		return strings.Index(key, metaZone) > 0 || strings.Index(key, legacyZone) > 0
+	}
 
-	go inZoneServerAddressList.Run()
-	go allZoneServerAddressList.Run()
+	dopplers := dopplerservice.NewFinder(adapter, inZone, logger)
+	dopplers.Start()
 
-	clientPool := clientpool.NewLoggregatorClientPool(logger, config.LoggregatorDropsondePort, inZoneServerAddressList, allZoneServerAddressList)
+	var legacyDopplers dopplerserver.Finder
+	if config.PreferredProtocol == "udp" {
+		legacyDopplers = dopplerservice.NewLegacyFinder(adapter, config.LoggregatorDropsondePort, inZone, logger)
+		legacyDopplers.Start()
+	}
+
+	metaZone := path.Join(dopplerservice.META_ROOT, config.Zone)
+	legacyZone := path.Join(dopplerservice.LEGACY_ROOT, config.Zone)
+
+	clientPool := clientpool.NewDopplerClient(logger, config.PreferredProtocol, dopplers, legacyDopplers, inZone)
 	return clientPool
 }
 
