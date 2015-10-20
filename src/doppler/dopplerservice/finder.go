@@ -21,17 +21,20 @@ type Finder interface {
 }
 
 type finder struct {
-	addressMap     map[string]struct{}
-	addresses      []string
 	storeAdapter   storeadapter.StoreAdapter
 	stopChan       chan struct{}
 	storeKeyPrefix string
-	unmarshal      func(value []byte) []string
-	logger         *gosteno.Logger
+	onUpdate       func([]string)
+
 	sync.RWMutex
+	addressMap map[string]struct{}
+	addresses  []string
+
+	unmarshal func(value []byte) []string
+	logger    *gosteno.Logger
 }
 
-func NewFinder(storeAdapter storeadapter.StoreAdapter, logger *gosteno.Logger) Finder {
+func NewFinder(storeAdapter storeadapter.StoreAdapter, onUpdate func(addresses []string), logger *gosteno.Logger) Finder {
 	return &finder{
 		storeAdapter:   storeAdapter,
 		addresses:      []string{},
@@ -47,11 +50,12 @@ func NewFinder(storeAdapter storeadapter.StoreAdapter, logger *gosteno.Logger) F
 			}
 			return nil
 		},
-		logger: logger,
+		onUpdate: onUpdate,
+		logger:   logger,
 	}
 }
 
-func NewLegacyFinder(storeAdapter storeadapter.StoreAdapter, port int, logger *gosteno.Logger) Finder {
+func NewLegacyFinder(storeAdapter storeadapter.StoreAdapter, port int, onUpdate func(addresses []string), logger *gosteno.Logger) Finder {
 	return &finder{
 		storeAdapter:   storeAdapter,
 		addresses:      []string{},
@@ -64,7 +68,8 @@ func NewLegacyFinder(storeAdapter storeadapter.StoreAdapter, port int, logger *g
 			}
 			return []string{fmt.Sprintf("udp://%s:%d", value, port)}
 		},
-		logger: logger,
+		onUpdate: onUpdate,
+		logger:   logger,
 	}
 }
 
@@ -123,8 +128,13 @@ func (f *finder) handleEvent(event *storeadapter.WatchEvent) {
 			}
 		}
 	}
+
 	f.addresses = keys(f.addressMap)
+	if f.onUpdate != nil {
+		f.onUpdate(f.addresses)
+	}
 	f.Unlock()
+
 }
 
 func keys(serviceMap map[string]struct{}) []string {
@@ -167,6 +177,10 @@ func (f *finder) discoverAddresses() {
 	f.Lock()
 	f.addressMap = addressMap
 	f.addresses = addresses
+
+	if f.onUpdate != nil {
+		f.onUpdate(f.addresses)
+	}
 	f.Unlock()
 }
 
