@@ -23,13 +23,11 @@ var _ = Describe("Finder", func() {
 		var (
 			order       chan string
 			fakeAdapter *fakes.FakeStoreAdapter
-			path        string
 			errChan     chan error
 			stopChan    chan bool
 		)
 
 		BeforeEach(func() {
-			path = "/a/path"
 			order = make(chan string, 2)
 			stopChan = make(chan bool)
 			errChan = make(chan error, 1)
@@ -39,7 +37,7 @@ var _ = Describe("Finder", func() {
 		})
 
 		JustBeforeEach(func() {
-			finder = dopplerservice.NewFinder(fakeAdapter, "/a/path", loggertesthelper.Logger())
+			finder = dopplerservice.NewFinder(fakeAdapter, loggertesthelper.Logger())
 			finder.Start()
 		})
 
@@ -50,12 +48,12 @@ var _ = Describe("Finder", func() {
 		Context("Start", func() {
 			BeforeEach(func() {
 				fakeAdapter.WatchStub = func(key string) (events <-chan storeadapter.WatchEvent, stop chan<- bool, errors <-chan error) {
-					Expect(key).To(Equal(path))
+					Expect(key).To(Equal(dopplerservice.META_ROOT))
 					order <- "watch"
 					return nil, stopChan, errChan
 				}
 				fakeAdapter.ListRecursivelyStub = func(key string) (storeadapter.StoreNode, error) {
-					Expect(key).To(Equal(path))
+					Expect(key).To(Equal(dopplerservice.META_ROOT))
 					order <- "finder"
 					return storeadapter.StoreNode{}, nil
 				}
@@ -101,7 +99,7 @@ var _ = Describe("Finder", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			node = storeadapter.StoreNode{
-				Key:   "/healthstatus/loggregator/z1/loggregator_z1/0",
+				Key:   dopplerservice.LEGACY_ROOT + "/z1/loggregator_z1/0",
 				Value: []byte("10.0.0.1"),
 			}
 		})
@@ -201,9 +199,9 @@ var _ = Describe("Finder", func() {
 
 		Context("LegacyFinder", func() {
 			BeforeEach(func() {
-				finder = dopplerservice.NewLegacyFinder(storeAdapter, "/healthstatus/loggregator", 1234, loggertesthelper.Logger())
+				finder = dopplerservice.NewLegacyFinder(storeAdapter, 1234, loggertesthelper.Logger())
 				node = storeadapter.StoreNode{
-					Key:   "/healthstatus/loggregator/z1/loggregator_z1/0",
+					Key:   dopplerservice.LEGACY_ROOT + "/z1/loggregator_z1/0",
 					Value: []byte("10.0.0.1"),
 				}
 
@@ -217,13 +215,13 @@ var _ = Describe("Finder", func() {
 
 		Context("Finder", func() {
 			BeforeEach(func() {
-				finder = dopplerservice.NewFinder(storeAdapter, "/doppler/meta", loggertesthelper.Logger())
+				finder = dopplerservice.NewFinder(storeAdapter, loggertesthelper.Logger())
 			})
 
 			Context("with a single endpoint", func() {
 				BeforeEach(func() {
 					node = storeadapter.StoreNode{
-						Key:   "/doppler/meta/z1/loggregator_z1/0",
+						Key:   dopplerservice.META_ROOT + "/z1/loggregator_z1/0",
 						Value: []byte(`{"version": 1, "endpoints":["udp://10.0.0.1:1234"]}`),
 					}
 
@@ -238,7 +236,7 @@ var _ = Describe("Finder", func() {
 			Context("with multiple endpoints", func() {
 				BeforeEach(func() {
 					node = storeadapter.StoreNode{
-						Key:   "/doppler/meta/z1/loggregator_z1/0",
+						Key:   dopplerservice.META_ROOT + "/z1/loggregator_z1/0",
 						Value: []byte(`{"version": 1, "endpoints":["udp://10.0.0.1:1234", "tls://10.0.0.2:4567"]}`),
 					}
 

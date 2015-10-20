@@ -11,6 +11,7 @@ import (
 	"github.com/cloudfoundry/storeadapter"
 )
 
+//go:generate counterfeiter -o fakes/fakefinder.go . Finder
 type Finder interface {
 	Start()
 	Stop()
@@ -30,13 +31,13 @@ type finder struct {
 	sync.RWMutex
 }
 
-func NewFinder(storeAdapter storeadapter.StoreAdapter, storeKeyPrefix string, logger *gosteno.Logger) Finder {
+func NewFinder(storeAdapter storeadapter.StoreAdapter, logger *gosteno.Logger) Finder {
 	return &finder{
 		storeAdapter:   storeAdapter,
 		addresses:      []string{},
 		addressMap:     make(map[string]struct{}),
 		stopChan:       make(chan struct{}),
-		storeKeyPrefix: storeKeyPrefix,
+		storeKeyPrefix: META_ROOT,
 		unmarshal: func(value []byte) []string {
 			if value != nil {
 				var meta DopplerMeta
@@ -50,13 +51,13 @@ func NewFinder(storeAdapter storeadapter.StoreAdapter, storeKeyPrefix string, lo
 	}
 }
 
-func NewLegacyFinder(storeAdapter storeadapter.StoreAdapter, storeKeyPrefix string, port int, logger *gosteno.Logger) Finder {
+func NewLegacyFinder(storeAdapter storeadapter.StoreAdapter, port int, logger *gosteno.Logger) Finder {
 	return &finder{
 		storeAdapter:   storeAdapter,
 		addresses:      []string{},
 		addressMap:     make(map[string]struct{}),
 		stopChan:       make(chan struct{}),
-		storeKeyPrefix: storeKeyPrefix,
+		storeKeyPrefix: LEGACY_ROOT,
 		unmarshal: func(value []byte) []string {
 			if value == nil {
 				return nil

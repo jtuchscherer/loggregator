@@ -16,6 +16,8 @@ type DopplerMeta struct {
 }
 
 const dopplerMetaVersion = 1
+const META_ROOT = "/doppler/meta"
+const LEGACY_ROOT = "/healthstatus/doppler"
 
 func Announce(localIP string, ttl time.Duration, config *config.Config, storeAdapter storeadapter.StoreAdapter, logger *gosteno.Logger) chan (chan bool) {
 	dopplerMetaBytes, err := buildDopplerMeta(localIP, config)
@@ -23,7 +25,7 @@ func Announce(localIP string, ttl time.Duration, config *config.Config, storeAda
 		panic(err)
 	}
 
-	key := fmt.Sprintf("/doppler/meta/%s/%s/%d", config.Zone, config.JobName, config.Index)
+	key := fmt.Sprintf("%s/%s/%s/%d", META_ROOT, config.Zone, config.JobName, config.Index)
 	logger.Debugf("Starting Health Status Updates to Store: %s", key)
 
 	status, stopChan, err := storeAdapter.MaintainNode(storeadapter.StoreNode{
@@ -47,7 +49,7 @@ func Announce(localIP string, ttl time.Duration, config *config.Config, storeAda
 }
 
 func AnnounceLegacy(localIP string, ttl time.Duration, config *config.Config, storeAdapter storeadapter.StoreAdapter, logger *gosteno.Logger) chan (chan bool) {
-	key := fmt.Sprintf("/healthstatus/doppler/%s/%s/%d", config.Zone, config.JobName, config.Index)
+	key := fmt.Sprintf("%s/%s/%s/%d", LEGACY_ROOT, config.Zone, config.JobName, config.Index)
 	status, stopChan, err := storeAdapter.MaintainNode(storeadapter.StoreNode{
 		Key:   key,
 		Value: []byte(localIP),
