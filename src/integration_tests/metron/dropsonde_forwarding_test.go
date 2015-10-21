@@ -57,7 +57,8 @@ var _ = Describe("Dropsonde message forwarding", func() {
 		go metronInput.WriteToMetron(originalMessage)
 
 		Eventually(func() bool {
-			msg := <-receivedByDoppler
+			var msg signedMessage
+			Eventually(receivedByDoppler).Should(Receive(&msg))
 			return bytes.Equal(msg.signature, expectedMessage.signature) && bytes.Equal(msg.message, expectedMessage.message)
 		}).Should(BeTrue())
 	}, 2)

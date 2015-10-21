@@ -4,7 +4,7 @@ import (
 	"doppler/dopplerservice"
 	"flag"
 	"fmt"
-	"path"
+	"os"
 	"strings"
 	"time"
 
@@ -52,7 +52,11 @@ func main() {
 	log := logger.NewLogger(*debug, *logFilePath, "metron", config.Syslog)
 	log.Info("Startup: Setting up the Metron agent")
 
-	dopplerClientPool := initializeClientPool(config, log)
+	dopplerClientPool, err := initializeClientPool(config, log)
+	if err != nil {
+		log.Errorf("Error while initializing client pool: %s", err.Error())
+		os.Exit(-1)
+	}
 
 	dopplerForwarder := dopplerforwarder.New(dopplerClientPool, log)
 	byteSigner := signer.New(config.SharedSecret, dopplerForwarder)
@@ -71,35 +75,43 @@ func main() {
 	legacyUnmarshaller := legacyunmarshaller.New(legacyMessageTagger, log)
 	legacyReader := networkreader.New(fmt.Sprintf("localhost:%d", config.LegacyIncomingMessagesPort), "legacyAgentListener", legacyUnmarshaller, log)
 
+	log.Info("metron started")
+
 	go legacyReader.Start()
 	dropsondeReader.Start()
 }
 
-func initializeClientPool(config *config.Config, logger *gosteno.Logger) *clientpool.LoggregatorClientPool {
+func initializeClientPool(config *config.Config, logger *gosteno.Logger) (*clientpool.DopplerPool, error) {
 	adapter := storeAdapterProvider(config.EtcdUrls, config.EtcdMaxConcurrentRequests)
 	err := adapter.Connect()
 	if err != nil {
-		logger.Errorf("Error connecting to ETCD: %v", err)
+		return nil, err
 	}
 
-	inZone := func(key string) bool {
-		return strings.Index(key, metaZone) > 0 || strings.Index(key, legacyZone) > 0
+	preferInZone := func(relativePath string) bool {
+		return strings.HasPrefix(relativePath, "/"+config.Zone+"/")
 	}
 
-	dopplers := dopplerservice.NewFinder(adapter, inZone, logger)
+	clientPool := clientpool.NewDopplerPool(logger, clientpool.NewClient)
+
+	onUpdate := func(all map[string]string, preferred map[string]string) {
+		clientPool.Set(all, preferred)
+	}
+
+	dopplers, err := dopplerservice.NewFinder(adapter, config.PreferredProtocol, preferInZone, onUpdate, logger)
+	if err != nil {
+		return nil, err
+	}
 	dopplers.Start()
 
-	var legacyDopplers dopplerserver.Finder
-	if config.PreferredProtocol == "udp" {
-		legacyDopplers = dopplerservice.NewLegacyFinder(adapter, config.LoggregatorDropsondePort, inZone, logger)
-		legacyDopplers.Start()
+	onLegacyUpdate := func(all map[string]string, preferred map[string]string) {
+		clientPool.SetLegacy(all, preferred)
 	}
 
-	metaZone := path.Join(dopplerservice.META_ROOT, config.Zone)
-	legacyZone := path.Join(dopplerservice.LEGACY_ROOT, config.Zone)
+	legacyDopplers := dopplerservice.NewLegacyFinder(adapter, config.LoggregatorDropsondePort, preferInZone, onLegacyUpdate, logger)
+	legacyDopplers.Start()
 
-	clientPool := clientpool.NewDopplerClient(logger, config.PreferredProtocol, dopplers, legacyDopplers, inZone)
-	return clientPool
+	return clientPool, nil
 }
 
 func initializeMetrics(byteSigner *signer.Signer, config *config.Config, logger *gosteno.Logger) {

@@ -13,17 +13,17 @@ type FakeFinder struct {
 	StopStub        func()
 	stopMutex       sync.RWMutex
 	stopArgsForCall []struct{}
-	AllServersStub        func() []string
+	AllServersStub        func() map[string]string
 	allServersMutex       sync.RWMutex
 	allServersArgsForCall []struct{}
 	allServersReturns struct {
-		result1 []string
+		result1 map[string]string
 	}
-	PreferredServersStub        func() []string
+	PreferredServersStub        func() map[string]string
 	preferredServersMutex       sync.RWMutex
 	preferredServersArgsForCall []struct{}
 	preferredServersReturns struct {
-		result1 []string
+		result1 map[string]string
 	}
 }
 
@@ -57,7 +57,7 @@ func (fake *FakeFinder) StopCallCount() int {
 	return len(fake.stopArgsForCall)
 }
 
-func (fake *FakeFinder) AllServers() []string {
+func (fake *FakeFinder) AllServers() map[string]string {
 	fake.allServersMutex.Lock()
 	fake.allServersArgsForCall = append(fake.allServersArgsForCall, struct{}{})
 	fake.allServersMutex.Unlock()
@@ -74,14 +74,14 @@ func (fake *FakeFinder) AllServersCallCount() int {
 	return len(fake.allServersArgsForCall)
 }
 
-func (fake *FakeFinder) AllServersReturns(result1 []string) {
+func (fake *FakeFinder) AllServersReturns(result1 map[string]string) {
 	fake.AllServersStub = nil
 	fake.allServersReturns = struct {
-		result1 []string
+		result1 map[string]string
 	}{result1}
 }
 
-func (fake *FakeFinder) PreferredServers() []string {
+func (fake *FakeFinder) PreferredServers() map[string]string {
 	fake.preferredServersMutex.Lock()
 	fake.preferredServersArgsForCall = append(fake.preferredServersArgsForCall, struct{}{})
 	fake.preferredServersMutex.Unlock()
@@ -98,10 +98,10 @@ func (fake *FakeFinder) PreferredServersCallCount() int {
 	return len(fake.preferredServersArgsForCall)
 }
 
-func (fake *FakeFinder) PreferredServersReturns(result1 []string) {
+func (fake *FakeFinder) PreferredServersReturns(result1 map[string]string) {
 	fake.PreferredServersStub = nil
 	fake.preferredServersReturns = struct {
-		result1 []string
+		result1 map[string]string
 	}{result1}
 }
 

@@ -1,10 +1,13 @@
 package clientpool_test
 
 import (
+	"errors"
 	"metron/clientpool"
 	"metron/clientpool/fakes"
+	"strings"
 
 	steno "github.com/cloudfoundry/gosteno"
+	"github.com/cloudfoundry/loggregatorlib/loggertesthelper"
 	"github.com/cloudfoundry/loggregatorlib/loggregatorclient"
 
 	. "github.com/onsi/ginkgo"
@@ -15,16 +18,17 @@ import (
 //go:generate counterfeiter -o fakess/client.go ../../github.com/cloudfoundry/loggregatorlib/loggregatorclient Client
 var _ = Describe("DopplerPool", func() {
 	var (
-		pool   *clientpool.DopplerPool
-		logger *steno.Logger
+		pool          *clientpool.DopplerPool
+		clientFactory func(logger *steno.Logger, u string) (loggregatorclient.Client, error)
+		logger        *steno.Logger
 
 		port int
 
-		preferredServers map[string]loggregatorclient.Client
-		allServers       map[string]loggregatorclient.Client
+		preferredServers map[string]string
+		allServers       map[string]string
 
-		preferredLegacy map[string]loggregatorclient.Client
-		allLegacy       map[string]loggregatorclient.Client
+		preferredLegacy map[string]string
+		allLegacy       map[string]string
 	)
 
 	BeforeEach(func() {
@@ -32,76 +36,156 @@ var _ = Describe("DopplerPool", func() {
 
 		port = 5000 + config.GinkgoConfig.ParallelNode*100
 
-		preferredServers = map[string]loggregatorclient.Client{
-			"a": newFakeClient("udp", "pahost:paport"),
-			"b": newFakeClient("tls", "pbhost:pbport"),
+		clientFactory = fakeClientFactory
+
+		preferredServers = map[string]string{
+			"a": "udp://pahost:paport",
+			"b": "tls://pbhost:pbport",
 		}
-		allServers = map[string]loggregatorclient.Client{
-			"a": newFakeClient("udp", "ahost:aport"),
-			"b": newFakeClient("udp", "bhost:bport"),
+		allServers = map[string]string{
+			"a": "udp://ahost:aport",
+			"b": "udp://bhost:bport",
 		}
 
-		preferredLegacy = map[string]loggregatorclient.Client{
-			"a": newFakeClient("udp", "plahost:plaport"),
-			"b": newFakeClient("tls", "plbhost:plbport"),
+		preferredLegacy = map[string]string{
+			"a": "udp://plahost:plaport",
+			"b": "tls://plbhost:plbport",
 		}
-		allLegacy = map[string]loggregatorclient.Client{
-			"a": newFakeClient("udp", "lahost:laport"),
-			"b": newFakeClient("udp", "lbhost:lbport"),
+		allLegacy = map[string]string{
+			"a": "udp://lahost:laport",
+			"b": "udp://lbhost:lbport",
 		}
 	})
 
 	JustBeforeEach(func() {
-		pool = clientpool.NewDopplerPool(logger)
+		pool = clientpool.NewDopplerPool(logger, clientFactory)
 	})
 
-	Context("non-Legacy servers", func() {
-		Context("with preferred servers", func() {
-			It("has only preferred servers", func() {
-				pool.Set(allServers, preferredServers)
-				Expect(urls(pool.Clients())).To(ConsistOf(values(preferredServers)))
-			})
-		})
-
-		Context("with no preferred servers", func() {
-			It("has only non-preferred servers", func() {
-				pool.Set(allServers, nil)
-				Expect(urls(pool.Clients())).To(ConsistOf(values(allServers)))
-			})
-		})
-
-		Context("with Legacy Servers", func() {
-			It("ignores them", func() {
-				pool.Set(allServers, preferredServers)
-				pool.SetLegacy(allLegacy, preferredLegacy)
-
-				Expect(urls(pool.Clients())).To(ConsistOf(values(preferredServers)))
-			})
-
-			Context("with non-overlapping servers", func() {
-				It("returns a mix of legacy and non-legacy", func() {
-					allLegacy["c"] = newFakeClient("udp", "lchost:lcport")
-					pool.Set(allServers, preferredServers)
-					pool.SetLegacy(allLegacy, preferredLegacy)
-
-					Expect(urls(pool.Clients())).To(ConsistOf(values(preferredServers)))
-				})
-			})
-		})
-
-		Context("only Legacy servers", func() {
+	Describe("Setters", func() {
+		Context("non-Legacy servers", func() {
 			Context("with preferred servers", func() {
 				It("has only preferred servers", func() {
-					pool.SetLegacy(allLegacy, preferredLegacy)
-					Expect(urls(pool.Clients())).To(ConsistOf(values(preferredLegacy)))
+					pool.Set(allServers, preferredServers)
+					Expect(urls(pool.Clients())).To(ConsistOf(values(preferredServers)))
 				})
 			})
 
 			Context("with no preferred servers", func() {
 				It("has only non-preferred servers", func() {
-					pool.SetLegacy(allLegacy, nil)
-					Expect(urls(pool.Clients())).To(ConsistOf(values(allLegacy)))
+					pool.Set(allServers, nil)
+					Expect(urls(pool.Clients())).To(ConsistOf(values(allServers)))
 				})
+			})
+
+			Context("when the client factory errors", func() {
+				BeforeEach(func() {
+					logger = loggertesthelper.Logger()
+					loggertesthelper.TestLoggerSink.Clear()
+
+					clientFactory = func(_ *steno.Logger, _ string) (loggregatorclient.Client, error) {
+						return nil, errors.New("boom")
+					}
+				})
+
+				It("does not include the client", func() {
+					pool.Set(allServers, nil)
+					Expect(pool.Clients()).To(BeEmpty())
+					Expect(loggertesthelper.TestLoggerSink.LogContents()).To(ContainSubstring("Invalid url"))
+				})
+			})
+
+			Context("with Legacy Servers", func() {
+				It("ignores them", func() {
+					pool.Set(allServers, preferredServers)
+					pool.SetLegacy(allLegacy, preferredLegacy)
+
+					Expect(urls(pool.Clients())).To(ConsistOf(values(preferredServers)))
+				})
+
+				Context("with non-overlapping servers", func() {
+					It("returns a mix of legacy and non-legacy", func() {
+						allLegacy["c"] = "udp://lchost:lcport"
+						pool.Set(allServers, preferredServers)
+						pool.SetLegacy(allLegacy, preferredLegacy)
+
+						Expect(urls(pool.Clients())).To(ConsistOf(values(preferredServers)))
+					})
+				})
+			})
+
+			Context("only Legacy servers", func() {
+				Context("with preferred servers", func() {
+					It("has only preferred servers", func() {
+						pool.SetLegacy(allLegacy, preferredLegacy)
+						Expect(urls(pool.Clients())).To(ConsistOf(values(preferredLegacy)))
+					})
+				})
+
+				Context("with no preferred servers", func() {
+					It("has only non-preferred servers", func() {
+						pool.SetLegacy(allLegacy, nil)
+						Expect(urls(pool.Clients())).To(ConsistOf(values(allLegacy)))
+					})
+				})
+
+				Context("when the client factory errors", func() {
+					BeforeEach(func() {
+						logger = loggertesthelper.Logger()
+						loggertesthelper.TestLoggerSink.Clear()
+
+						clientFactory = func(_ *steno.Logger, _ string) (loggregatorclient.Client, error) {
+							return nil, errors.New("boom")
+						}
+					})
+
+					It("does not include the client", func() {
+						pool.SetLegacy(allLegacy, nil)
+						Expect(pool.Clients()).To(BeEmpty())
+						Expect(loggertesthelper.TestLoggerSink.LogContents()).To(ContainSubstring("Invalid url"))
+					})
+				})
+			})
+		})
+
+		Context("when a server no longer exists", func() {
+			var fakeClient *fakes.FakeClient
+
+			BeforeEach(func() {
+				fakeClient = newFakeClient("udp", "host:port")
+				clientFactory = func(_ *steno.Logger, _ string) (loggregatorclient.Client, error) {
+					return fakeClient, nil
+				}
+			})
+
+			It("the client is stopped", func() {
+				s := map[string]string{
+					"a": "udp://host:port",
+				}
+
+				pool.Set(s, nil)
+				Expect(fakeClient.StopCallCount()).To(Equal(0))
+				pool.Set(nil, nil)
+				Expect(fakeClient.StopCallCount()).To(Equal(1))
+			})
+		})
+
+		Context("with identical server data", func() {
+			It("reuses the Client", func() {
+				aServers := map[string]string{
+					"a": "a://b:c",
+				}
+				pool.Set(aServers, nil)
+				clientsA := pool.Clients()
+				Expect(clientsA).To(HaveLen(1))
+
+				mixedServers := map[string]string{
+					"a": "a://b:c",
+					"c": "d://e:f",
+				}
+				pool.Set(mixedServers, nil)
+				clientsB := pool.Clients()
+				Expect(clientsB).To(HaveLen(2))
+				Expect(clientsB).To(ContainElement(clientsA[0]))
 			})
 		})
 	})
@@ -112,28 +196,17 @@ var _ = Describe("DopplerPool", func() {
 				Expect(pool.Clients()).To(HaveLen(0))
 			})
 		})
-
-		It("stops non-existant clients", func() {
-			fakeClient := newFakeClient("udp", "host:port")
-			s := map[string]loggregatorclient.Client{
-				"a": fakeClient,
-			}
-			pool.Set(s, nil)
-			Expect(fakeClient.StopCallCount()).To(Equal(0))
-			pool.Set(nil, nil)
-			Expect(fakeClient.StopCallCount()).To(Equal(1))
-		})
 	})
 
 	Describe("RandomClient", func() {
 		Context("with a non-empty client pool", func() {
 			It("chooses a client with roughly uniform distribution", func() {
-				s := map[string]loggregatorclient.Client{
-					"1": newFakeClient("udp", "host:1"),
-					"2": newFakeClient("udp", "host:2"),
-					"3": newFakeClient("udp", "host:3"),
-					"4": newFakeClient("udp", "host:4"),
-					"5": newFakeClient("udp", "host:5"),
+				s := map[string]string{
+					"1": "udp://host:1",
+					"2": "udp://host:2",
+					"3": "udp://host:3",
+					"4": "udp://host:4",
+					"5": "udp://host:5",
 				}
 
 				pool.Set(s, nil)
@@ -166,12 +239,17 @@ func urls(clients []loggregatorclient.Client) []string {
 	return result
 }
 
-func values(m map[string]loggregatorclient.Client) []string {
+func values(m map[string]string) []string {
 	result := make([]string, 0, len(m))
 	for _, c := range m {
-		result = append(result, c.Scheme()+"://"+c.Address())
+		result = append(result, c)
 	}
 	return result
+}
+
+func fakeClientFactory(logger *steno.Logger, u string) (loggregatorclient.Client, error) {
+	i := strings.Index(u, "://")
+	return newFakeClient(u[:i], u[i+3:]), nil
 }
 
 func newFakeClient(proto, addr string) *fakes.FakeClient {

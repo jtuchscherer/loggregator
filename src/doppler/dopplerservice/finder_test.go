@@ -21,6 +21,13 @@ import (
 var _ = Describe("Finder", func() {
 	var finder dopplerservice.Finder
 
+	Context("validation", func() {
+		It("returns an error when protocol is invalid", func() {
+			_, err := dopplerservice.NewFinder(nil, "bogus", nil, nil, loggertesthelper.Logger())
+			Expect(err).To(HaveOccurred())
+		})
+	})
+
 	Describe("Running", func() {
 		var (
 			order       chan string
@@ -42,7 +49,9 @@ var _ = Describe("Finder", func() {
 			preferredCallback := func(string) bool {
 				return false
 			}
-			finder = dopplerservice.NewFinder(fakeAdapter, preferredCallback, nil, loggertesthelper.Logger())
+			var err error
+			finder, err = dopplerservice.NewFinder(fakeAdapter, "udp", preferredCallback, nil, loggertesthelper.Logger())
+			Expect(err).NotTo(HaveOccurred())
 			finder.Start()
 		})
 
@@ -90,7 +99,7 @@ var _ = Describe("Finder", func() {
 			node         storeadapter.StoreNode
 			updateNode   storeadapter.StoreNode
 
-			updateCallback func(all []string, preferred []string)
+			updateCallback func(all map[string]string, preferred map[string]string)
 			callbackCount  *int32
 
 			preferredCallback func(key string) bool
@@ -116,7 +125,7 @@ var _ = Describe("Finder", func() {
 
 			callbackCount = new(int32)
 			count := callbackCount
-			updateCallback = func(a []string, p []string) {
+			updateCallback = func(a map[string]string, p map[string]string) {
 				atomic.AddInt32(count, 1)
 			}
 
@@ -140,10 +149,10 @@ var _ = Describe("Finder", func() {
 			return int(atomic.LoadInt32(preferredCount))
 		}
 
-		testUpdateFinder := func(updatedAddress ...string) func() {
+		testUpdateFinder := func(updatedAddress map[string]string) func() {
 			return func() {
 				Context("when a service exists", func() {
-					BeforeEach(func() {
+					JustBeforeEach(func() {
 						err := storeAdapter.Create(node)
 						Expect(err).NotTo(HaveOccurred())
 
@@ -156,16 +165,16 @@ var _ = Describe("Finder", func() {
 						err := storeAdapter.Update(updateNode)
 						Expect(err).NotTo(HaveOccurred())
 
-						Eventually(finder.AllServers).Should(ConsistOf(updatedAddress))
+						Eventually(finder.AllServers).Should(Equal(updatedAddress))
 						Expect(getCallbackCount()).To(Equal(2))
-						Expect(finder.PreferredServers()).To(ConsistOf(updatedAddress))
+						Expect(finder.PreferredServers()).To(Equal(updatedAddress))
 						Expect(getPreferredCount()).To(Equal(2))
 					})
 				})
 			}
 		}
 
-		testFinder := func(expectedAddress ...string) func() {
+		testFinder := func(expectedAddress map[string]string) func() {
 			return func() {
 				Context("when a service is created", func() {
 					Context("before dopplerservice begins", func() {
@@ -176,9 +185,9 @@ var _ = Describe("Finder", func() {
 							storeAdapter.Create(node)
 							finder.Start()
 
-							Eventually(finder.AllServers).Should(ConsistOf(expectedAddress))
+							Eventually(finder.AllServers).Should(Equal(expectedAddress))
 							Expect(getCallbackCount()).To(Equal(1))
-							Expect(finder.PreferredServers()).To(ConsistOf(expectedAddress))
+							Expect(finder.PreferredServers()).To(Equal(expectedAddress))
 							Expect(getPreferredCount()).To(Equal(1))
 						})
 					})
@@ -190,16 +199,16 @@ var _ = Describe("Finder", func() {
 
 							storeAdapter.Create(node)
 
-							Eventually(finder.AllServers).Should(ConsistOf(expectedAddress))
+							Eventually(finder.AllServers).Should(Equal(expectedAddress))
 							Expect(getCallbackCount()).To(Equal(1))
-							Expect(finder.PreferredServers()).To(ConsistOf(expectedAddress))
+							Expect(finder.PreferredServers()).To(Equal(expectedAddress))
 							Expect(getPreferredCount()).To(Equal(1))
 						})
 					})
 				})
 
 				Context("when services exists", func() {
-					BeforeEach(func() {
+					JustBeforeEach(func() {
 						err := storeAdapter.Create(node)
 						Expect(err).NotTo(HaveOccurred())
 
@@ -224,9 +233,9 @@ var _ = Describe("Finder", func() {
 						}
 						storeAdapter.Create(router)
 
-						Consistently(finder.AllServers).Should(ConsistOf(expectedAddress))
+						Consistently(finder.AllServers).Should(Equal(expectedAddress))
 						Expect(getCallbackCount()).To(Equal(1))
-						Expect(finder.PreferredServers()).To(ConsistOf(expectedAddress))
+						Expect(finder.PreferredServers()).To(Equal(expectedAddress))
 						Expect(getPreferredCount()).To(Equal(1))
 					})
 
@@ -260,13 +269,21 @@ var _ = Describe("Finder", func() {
 				updateNode.Value = []byte("10.0.0.2")
 			})
 
-			Context("Basics", testFinder("udp://10.0.0.1:1234"))
-			Context("Update", testUpdateFinder("udp://10.0.0.2:1234"))
+			Context("Basics", testFinder(map[string]string{"/z1/loggregator_z1/0": "udp://10.0.0.1:1234"}))
+			Context("Update", testUpdateFinder(map[string]string{"/z1/loggregator_z1/0": "udp://10.0.0.2:1234"}))
 		})
 
 		Context("Finder", func() {
+			var preferredProtocol string
+
 			BeforeEach(func() {
-				finder = dopplerservice.NewFinder(storeAdapter, preferredCallback, updateCallback, loggertesthelper.Logger())
+				preferredProtocol = "udp"
+			})
+
+			JustBeforeEach(func() {
+				var err error
+				finder, err = dopplerservice.NewFinder(storeAdapter, preferredProtocol, preferredCallback, updateCallback, loggertesthelper.Logger())
+				Expect(err).NotTo(HaveOccurred())
 			})
 
 			Context("with a single endpoint", func() {
@@ -280,8 +297,8 @@ var _ = Describe("Finder", func() {
 					updateNode.Value = []byte(`{"version": 1, "endpoints":["udp://10.0.0.2:1234"]}`)
 				})
 
-				Context("Basics", testFinder("udp://10.0.0.1:1234"))
-				Context("Update", testUpdateFinder("udp://10.0.0.2:1234"))
+				Context("Basics", testFinder(map[string]string{"/z1/loggregator_z1/0": "udp://10.0.0.1:1234"}))
+				Context("Update", testUpdateFinder(map[string]string{"/z1/loggregator_z1/0": "udp://10.0.0.2:1234"}))
 			})
 
 			Context("with multiple endpoints", func() {
@@ -295,19 +312,31 @@ var _ = Describe("Finder", func() {
 					updateNode.Value = []byte(`{"version": 1, "endpoints":["udp://10.0.0.2:1235", "tls://10.0.0.3:4568"]}`)
 				})
 
-				Context("Basics", testFinder("udp://10.0.0.1:1234", "tls://10.0.0.2:4567"))
-				Context("Update", testUpdateFinder("udp://10.0.0.2:1235", "tls://10.0.0.3:4568"))
+				Context("with udp preferred", func() {
+					BeforeEach(func() {
+						preferredProtocol = "udp"
+					})
 
+					Context("Basics", testFinder(map[string]string{"/z1/loggregator_z1/0": "udp://10.0.0.1:1234"}))
+					Context("Update", testUpdateFinder(map[string]string{"/z1/loggregator_z1/0": "udp://10.0.0.2:1235"}))
+				})
+
+				Context("with tls preferred", func() {
+					BeforeEach(func() {
+						preferredProtocol = "tls"
+					})
+
+					Context("Basics", testFinder(map[string]string{"/z1/loggregator_z1/0": "tls://10.0.0.2:4567"}))
+					Context("Update", testUpdateFinder(map[string]string{"/z1/loggregator_z1/0": "tls://10.0.0.3:4568"}))
+				})
 			})
 		})
 
 		Context("with a preferred filter", func() {
 			BeforeEach(func() {
 				preferredCallback = func(k string) bool {
-					return strings.Index(k, "z2") > 0
+					return strings.HasPrefix(k, "/z2")
 				}
-
-				finder = dopplerservice.NewFinder(storeAdapter, preferredCallback, updateCallback, loggertesthelper.Logger())
 			})
 
 			JustBeforeEach(func() {
@@ -323,6 +352,9 @@ var _ = Describe("Finder", func() {
 				}
 				storeAdapter.Create(node2)
 
+				var err error
+				finder, err = dopplerservice.NewFinder(storeAdapter, "udp", preferredCallback, updateCallback, loggertesthelper.Logger())
+				Expect(err).NotTo(HaveOccurred())
 				finder.Start()
 			})
 

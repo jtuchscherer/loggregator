@@ -14,37 +14,42 @@ import (
 var ErrorEmptyClientPool = errors.New("loggregator client pool is empty")
 
 type DopplerPool struct {
-	logger *gosteno.Logger
+	logger        *gosteno.Logger
+	clientFactory func(logger *gosteno.Logger, url string) (loggregatorclient.Client, error)
 
 	sync.RWMutex
 	clients    map[string]loggregatorclient.Client
 	clientList []loggregatorclient.Client
 
-	servers       map[string]loggregatorclient.Client
-	legacyServers map[string]loggregatorclient.Client
+	nonLegacyServers map[string]string
+	legacyServers    map[string]string
 }
 
-func NewDopplerPool(logger *gosteno.Logger) *DopplerPool {
+func NewDopplerPool(logger *gosteno.Logger, clientFactory func(logger *gosteno.Logger, url string) (loggregatorclient.Client, error)) *DopplerPool {
 	return &DopplerPool{
-		logger: logger,
+		logger:        logger,
+		clientFactory: clientFactory,
 	}
 }
 
-func (pool *DopplerPool) Set(all map[string]loggregatorclient.Client, preferred map[string]loggregatorclient.Client) {
+func (pool *DopplerPool) Set(all map[string]string, preferred map[string]string) {
 	pool.Lock()
+
 	if len(preferred) > 0 {
-		pool.servers = preferred
+		pool.nonLegacyServers = preferred
 	} else if len(all) > 0 {
-		pool.servers = all
+		pool.nonLegacyServers = all
 	} else {
-		pool.servers = nil
+		pool.nonLegacyServers = nil
 	}
+
 	pool.merge()
 	pool.Unlock()
 }
 
-func (pool *DopplerPool) SetLegacy(all map[string]loggregatorclient.Client, preferred map[string]loggregatorclient.Client) {
+func (pool *DopplerPool) SetLegacy(all map[string]string, preferred map[string]string) {
 	pool.Lock()
+
 	if len(preferred) > 0 {
 		pool.legacyServers = preferred
 	} else if len(all) > 0 {
@@ -52,6 +57,7 @@ func (pool *DopplerPool) SetLegacy(all map[string]loggregatorclient.Client, pref
 	} else {
 		pool.legacyServers = nil
 	}
+
 	pool.merge()
 	pool.Unlock()
 }
@@ -72,16 +78,53 @@ func (pool *DopplerPool) RandomClient() (loggregatorclient.Client, error) {
 	return list[rand.Intn(len(list))], nil
 }
 
+func (pool *DopplerPool) getClient(url string) loggregatorclient.Client {
+	var client loggregatorclient.Client
+	if client = pool.clients[url]; client == nil {
+		return nil
+	}
+
+	// scheme://address
+	if !((len(url) == len(client.Scheme())+3+len(client.Address())) &&
+		strings.HasPrefix(url, client.Scheme()) && strings.HasSuffix(url, client.Address())) {
+		return nil
+	}
+
+	return client
+}
+
 func (pool *DopplerPool) merge() {
 	newClients := map[string]loggregatorclient.Client{}
 
-	for key, c := range pool.servers {
-		newClients[key] = c
+	for key, u := range pool.nonLegacyServers {
+		client := pool.getClient(u)
+		if client == nil {
+			var err error
+			client, err = pool.clientFactory(pool.logger, u)
+			if err != nil {
+				pool.logger.Errord(map[string]interface{}{
+					"doppler": key, "url": u, "error": err,
+				}, "Invalid url")
+				continue
+			}
+		}
+		newClients[key] = client
 	}
 
-	for key, c := range pool.legacyServers {
+	for key, u := range pool.legacyServers {
 		if _, ok := newClients[key]; !ok {
-			newClients[key] = c
+			client := pool.getClient(u)
+			if client == nil {
+				var err error
+				client, err = pool.clientFactory(pool.logger, u)
+				if err != nil {
+					pool.logger.Errord(map[string]interface{}{
+						"doppler": key, "url": u, "error": err,
+					}, "Invalid url")
+					continue
+				}
+			}
+			newClients[key] = client
 		}
 	}
 

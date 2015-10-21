@@ -16,46 +16,6 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-type testServer struct {
-	conn        net.PacketConn
-	messageChan chan *events.Envelope
-	stopChan    chan struct{}
-}
-
-func newTestServer(messageChan chan *events.Envelope) *testServer {
-	return &testServer{
-		conn:        eventuallyListensForUDP("localhost:3457"),
-		messageChan: messageChan,
-		stopChan:    make(chan struct{}),
-	}
-}
-
-func (server *testServer) start() {
-	for {
-		readBuffer := make([]byte, 65535)
-		readCount, _, _ := server.conn.ReadFrom(readBuffer)
-		readData := make([]byte, readCount)
-		copy(readData, readBuffer[:readCount])
-
-		if len(readData) > 32 {
-			var event events.Envelope
-			proto.Unmarshal(readData[32:], &event)
-			server.messageChan <- &event
-		}
-
-		select {
-		case <-server.stopChan:
-			return
-		default:
-		}
-	}
-}
-
-func (server *testServer) stop() {
-	close(server.stopChan)
-	server.conn.Close()
-}
-
 var _ = Describe("Legacy message forwarding", func() {
 	var (
 		connection  net.Conn
@@ -65,11 +25,11 @@ var _ = Describe("Legacy message forwarding", func() {
 
 	BeforeEach(func() {
 		messageChan = make(chan *events.Envelope, 1000)
-		testServer = newTestServer(messageChan)
+		testServer = newDopplerTestServer(messageChan)
 
 		node := storeadapter.StoreNode{
 			Key:   "/healthstatus/doppler/z1/0",
-			Value: []byte("localhost"),
+			Value: []byte("127.0.0.1"),
 		}
 		adapter := etcdRunner.Adapter(nil)
 		adapter.Create(node)
@@ -147,3 +107,43 @@ var _ = Describe("Legacy message forwarding", func() {
 		Consistently(messageChan, 4).ShouldNot(Receive(matchers.MatchSpecifiedContents(unmatchedHttpStop)))
 	})
 })
+
+type testServer struct {
+	conn        net.PacketConn
+	messageChan chan *events.Envelope
+	stopChan    chan struct{}
+}
+
+func newDopplerTestServer(messageChan chan *events.Envelope) *testServer {
+	return &testServer{
+		conn:        eventuallyListensForUDP("localhost:3457"),
+		messageChan: messageChan,
+		stopChan:    make(chan struct{}),
+	}
+}
+
+func (server *testServer) start() {
+	for {
+		readBuffer := make([]byte, 65535)
+		readCount, _, _ := server.conn.ReadFrom(readBuffer)
+		readData := make([]byte, readCount)
+		copy(readData, readBuffer[:readCount])
+
+		if len(readData) > 32 {
+			var event events.Envelope
+			proto.Unmarshal(readData[32:], &event)
+			server.messageChan <- &event
+		}
+
+		select {
+		case <-server.stopChan:
+			return
+		default:
+		}
+	}
+}
+
+func (server *testServer) stop() {
+	close(server.stopChan)
+	server.conn.Close()
+}
