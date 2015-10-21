@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 
+	"github.com/cloudfoundry/storeadapter"
 	"github.com/cloudfoundry/storeadapter/storerunner/etcdstorerunner"
 	"github.com/pivotal-golang/localip"
 
@@ -26,6 +27,7 @@ var tmpdir string
 var pathToMetronExecutable string
 var metronSession *gexec.Session
 var etcdRunner *etcdstorerunner.ETCDClusterRunner
+var etcdAdapter storeadapter.StoreAdapter
 var etcdPort int
 var localIPAddress string
 
@@ -42,6 +44,7 @@ var _ = BeforeSuite(func() {
 	etcdPort = 5800 + (config.GinkgoConfig.ParallelNode-1)*10
 	etcdRunner = etcdstorerunner.NewETCDClusterRunner(etcdPort, 1, nil)
 	etcdRunner.Start()
+	etcdAdapter = etcdRunner.Adapter(nil)
 
 	metronSession, err = startMetron()
 	Expect(err).ShouldNot(HaveOccurred())
@@ -51,7 +54,7 @@ var _ = AfterSuite(func() {
 	stopMetron()
 	gexec.CleanupBuildArtifacts()
 
-	etcdRunner.Adapter(nil).Disconnect()
+	etcdAdapter.Disconnect()
 	etcdRunner.Stop()
 	os.RemoveAll(tmpdir)
 })
