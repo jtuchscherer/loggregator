@@ -13,26 +13,24 @@ import (
 
 var ErrorEmptyClientPool = errors.New("loggregator client pool is empty")
 
-type DopplerClient struct {
-	preferredProtocol string
-	logger            *gosteno.Logger
+type DopplerPool struct {
+	logger *gosteno.Logger
 
 	sync.RWMutex
 	clients    map[string]loggregatorclient.Client
 	clientList []loggregatorclient.Client
 
-	servers       map[string]string
-	legacyServers map[string]string
+	servers       map[string]loggregatorclient.Client
+	legacyServers map[string]loggregatorclient.Client
 }
 
-func NewDopplerClient(logger *gosteno.Logger, preferredProtocol string) *DopplerClient {
-	return &DopplerClient{
-		logger:            logger,
-		preferredProtocol: preferredProtocol,
+func NewDopplerPool(logger *gosteno.Logger) *DopplerPool {
+	return &DopplerPool{
+		logger: logger,
 	}
 }
 
-func (pool *DopplerClient) Set(all map[string]string, preferred map[string]string) {
+func (pool *DopplerPool) Set(all map[string]loggregatorclient.Client, preferred map[string]loggregatorclient.Client) {
 	pool.Lock()
 	if len(preferred) > 0 {
 		pool.servers = preferred
@@ -45,7 +43,7 @@ func (pool *DopplerClient) Set(all map[string]string, preferred map[string]strin
 	pool.Unlock()
 }
 
-func (pool *DopplerClient) SetLegacy(all map[string]string, preferred map[string]string) {
+func (pool *DopplerPool) SetLegacy(all map[string]loggregatorclient.Client, preferred map[string]loggregatorclient.Client) {
 	pool.Lock()
 	if len(preferred) > 0 {
 		pool.legacyServers = preferred
@@ -58,13 +56,13 @@ func (pool *DopplerClient) SetLegacy(all map[string]string, preferred map[string
 	pool.Unlock()
 }
 
-func (pool *DopplerClient) Clients() []loggregatorclient.Client {
+func (pool *DopplerPool) Clients() []loggregatorclient.Client {
 	defer pool.RUnlock()
 	pool.RLock()
 	return pool.clientList
 }
 
-func (pool *DopplerClient) RandomClient() (loggregatorclient.Client, error) {
+func (pool *DopplerPool) RandomClient() (loggregatorclient.Client, error) {
 	list := pool.Clients()
 
 	if len(list) == 0 {
@@ -74,33 +72,15 @@ func (pool *DopplerClient) RandomClient() (loggregatorclient.Client, error) {
 	return list[rand.Intn(len(list))], nil
 }
 
-func (pool *DopplerClient) merge() {
+func (pool *DopplerPool) merge() {
 	newClients := map[string]loggregatorclient.Client{}
 
-	for key, url := range pool.servers {
-		c, err := pool.newClient(url)
-		if err != nil {
-			pool.logger.Errord(map[string]interface{}{
-				"key": key, "err": err,
-			}, "Invalid url")
-
-			continue
-		}
-
+	for key, c := range pool.servers {
 		newClients[key] = c
 	}
 
-	for key, url := range pool.legacyServers {
+	for key, c := range pool.legacyServers {
 		if _, ok := newClients[key]; !ok {
-			c, err := pool.newClient(url)
-			if err != nil {
-				pool.logger.Errord(map[string]interface{}{
-					"key": key, "err": err,
-				}, "Invalid url")
-
-				continue
-			}
-
 			newClients[key] = c
 		}
 	}
@@ -120,13 +100,13 @@ func (pool *DopplerClient) merge() {
 	pool.clientList = newList
 }
 
-func (pool *DopplerClient) newClient(url string) (loggregatorclient.Client, error) {
+func NewClient(logger *gosteno.Logger, url string) (loggregatorclient.Client, error) {
 	if index := strings.Index(url, "://"); index > 0 {
 		switch url[:index] {
 		case "udp":
-			return loggregatorclient.NewUDPClient(pool.logger, url[index+3:], loggregatorclient.DefaultBufferSize), nil
+			return loggregatorclient.NewUDPClient(logger, url[index+3:], loggregatorclient.DefaultBufferSize)
 		case "tls":
-			return nil, errors.New("tls not implement")
+			return loggregatorclient.NewTLSClient(logger, url[index+3:])
 		}
 	}
 
